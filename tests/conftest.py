@@ -32,6 +32,8 @@ def tweet_factory():
             media=overrides.pop("media", []),
             urls=overrides.pop("urls", []),
             is_retweet=overrides.pop("is_retweet", False),
+            is_favorited=overrides.pop("is_favorited", False),
+            is_bookmarked=overrides.pop("is_bookmarked", False),
             lang=overrides.pop("lang", "en"),
             retweeted_by=overrides.pop("retweeted_by", None),
             quoted_tweet=overrides.pop("quoted_tweet", None),

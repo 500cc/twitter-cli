@@ -46,6 +46,8 @@ class Tweet:
     media: List[TweetMedia] = field(default_factory=list)
     urls: List[str] = field(default_factory=list)
     is_retweet: bool = False
+    is_favorited: bool = False
+    is_bookmarked: bool = False
     lang: str = ""
     retweeted_by: Optional[str] = None
     quoted_tweet: Optional[Tweet] = None

@@ -93,3 +93,14 @@ def test_tweet_roundtrip_preserves_promoted_flag(tweet_factory) -> None:
     assert payload["isPromoted"] is True
     restored = tweet_from_dict(payload)
     assert restored.is_promoted is True
+
+
+def test_tweet_roundtrip_preserves_viewer_reactions(tweet_factory) -> None:
+    tweet = tweet_factory("101", is_favorited=True, is_bookmarked=True)
+    payload = tweet_to_dict(tweet)
+
+    assert payload["isFavorited"] is True
+    assert payload["isBookmarked"] is True
+    restored = tweet_from_dict(payload)
+    assert restored.is_favorited is True
+    assert restored.is_bookmarked is True

@@ -867,10 +867,12 @@ class TestParseTweetResult:
             "full_text": "Hello world! This is a test tweet.",
             "created_at": "Sat Mar 08 12:00:00 +0000 2026",
             "favorite_count": 100,
+            "favorited": True,
             "retweet_count": 25,
             "reply_count": 5,
             "quote_count": 3,
             "bookmark_count": 10,
+            "bookmarked": True,
             "lang": "en",
             "entities": {"urls": []},
         },
@@ -895,6 +897,8 @@ class TestParseTweetResult:
         assert tweet.author.verified is True  # is_blue_verified
         assert tweet.metrics.likes == 100
         assert tweet.metrics.views == 5000
+        assert tweet.is_favorited is True
+        assert tweet.is_bookmarked is True
         assert tweet.lang == "en"
         assert tweet.is_retweet is False
 
