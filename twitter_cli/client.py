@@ -639,6 +639,29 @@ class TwitterClient:
         self._write_delay()
         return True
 
+    def send_timeline_feedback(self, feedback_url, feedback_type, undo=False):
+        # type: (str, str, bool) -> bool
+        """Send (or undo) a HomeTimeline feedback action for one post."""
+        parsed = urllib.parse.urlsplit(feedback_url)
+        if parsed.path != "/2/timeline/feedback.json" or parsed.scheme or parsed.netloc:
+            raise ValueError("Invalid timeline feedback URL")
+        params = urllib.parse.parse_qs(parsed.query)
+        action_metadata = (params.get("action_metadata") or [None])[0]
+        if not action_metadata or (params.get("feedback_type") or [None])[0] != feedback_type:
+            raise ValueError("Invalid timeline feedback metadata")
+
+        url = "https://x.com/i/api/2/timeline/feedback.json?%s" % urllib.parse.urlencode({
+            "feedback_type": feedback_type,
+            "action_metadata": action_metadata,
+        })
+        self._api_request(
+            url,
+            method="POST",
+            form={"feedback_type": feedback_type, "undo": "true" if undo else "false"},
+        )
+        self._write_delay()
+        return True
+
     def fetch_me(self):
         # type: () -> UserProfile
         """Fetch the currently authenticated user's profile.
@@ -946,23 +969,29 @@ class TwitterClient:
         """Make authenticated GET request to Twitter API."""
         return self._api_request(url, method="GET")
 
-    def _api_request(self, url, method="GET", body=None):
-        # type: (str, str, Optional[Dict[str, Any]]) -> Dict[str, Any]
+    def _api_request(self, url, method="GET", body=None, form=None):
+        # type: (str, str, Optional[Dict[str, Any]], Optional[Dict[str, str]]) -> Dict[str, Any]
         """Make authenticated request to Twitter API with retry on rate limits.
 
         Uses curl_cffi for Chrome TLS/JA3/HTTP2 fingerprint impersonation.
         Handles both GET and POST. Retries on HTTP 429 and JSON error code 88.
         """
         headers = self._build_headers(url=url, method=method)
+        if form is not None:
+            # Timeline feedback is a REST-style endpoint: it expects an
+            # application/x-www-form-urlencoded body, not GraphQL JSON.
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
+            headers["Referer"] = "https://x.com/home"
         session = _get_cffi_session()
         json_body = body  # curl_cffi handles JSON serialization
 
         for attempt in range(self._max_retries + 1):
             try:
                 if method == "POST":
-                    response = session.post(
-                        url, headers=headers, json=json_body, timeout=30,
-                    )
+                    if form is None:
+                        response = session.post(url, headers=headers, json=json_body, timeout=30)
+                    else:
+                        response = session.post(url, headers=headers, data=form, timeout=30)
                 else:
                     response = session.get(url, headers=headers, timeout=30)
 

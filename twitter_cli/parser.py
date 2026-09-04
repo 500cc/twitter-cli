@@ -504,6 +504,36 @@ def parse_timeline_response(data, get_instructions):
         logger.warning("No timeline instructions found")
         return tweets, next_cursor
 
+    feedback_actions = _deep_get(data, "data", "home", "home_timeline_urt", "responseObjects", "feedbackActions") or []
+    feedback_by_key = {
+        str(action.get("key")): action.get("value")
+        for action in feedback_actions
+        if isinstance(action, dict) and isinstance(action.get("value"), dict)
+    }
+
+    def attach_feedback(tweet, item_content, feedback_info=None):
+        # The timeline entry only contains an action key; its request URL lives
+        # in responseObjects.feedbackActions for this HomeTimeline response.
+        # feedbackInfo is a sibling of itemContent on TimelineTimelineItem.
+        # Retain the itemContent lookup as a compatibility fallback for older
+        # timeline shapes and nested modules.
+        feedback_keys = (
+            _deep_get(feedback_info, "feedbackKeys")
+            or _deep_get(item_content, "feedbackInfo", "feedbackKeys")
+            or []
+        )
+        for feedback_key in feedback_keys:
+            feedback = feedback_by_key.get(str(feedback_key))
+            if not isinstance(feedback, dict) or feedback.get("feedbackType") != "DontLike":
+                continue
+            feedback_url = feedback.get("feedbackUrl")
+            if isinstance(feedback_url, str) and feedback_url.startswith("/2/timeline/feedback.json"):
+                tweet.not_interested_feedback = {
+                    "feedbackType": "DontLike",
+                    "feedbackUrl": feedback_url,
+                }
+                return
+
     for instruction in instructions:
         entries = instruction.get("entries") or instruction.get("moduleItems") or []
         for entry in entries:
@@ -515,6 +545,7 @@ def parse_timeline_response(data, get_instructions):
             if result:
                 tweet = parse_tweet_result(result)
                 if tweet:
+                    attach_feedback(tweet, item_content, content.get("feedbackInfo"))
                     tweet.is_promoted = bool(
                         str(entry.get("entryId") or "").startswith("promoted-")
                         or item_content.get("promotedMetadata")
@@ -532,7 +563,9 @@ def parse_timeline_response(data, get_instructions):
                 if nested_result:
                     tweet = parse_tweet_result(nested_result)
                     if tweet:
-                        nested_item_content = _deep_get(nested_item, "item", "itemContent") or {}
+                        nested_item = nested_item.get("item") or {}
+                        nested_item_content = nested_item.get("itemContent") or {}
+                        attach_feedback(tweet, nested_item_content, nested_item.get("feedbackInfo"))
                         tweet.is_promoted = bool(
                             str(_deep_get(nested_item, "entryId") or "").startswith("promoted-")
                             or nested_item_content.get("promotedMetadata")

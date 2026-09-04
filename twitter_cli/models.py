@@ -6,7 +6,7 @@ Defines Tweet, Author, Metrics, and TweetMedia as simple dataclasses.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -56,6 +56,9 @@ class Tweet:
     article_text: Optional[str] = None
     is_subscriber_only: bool = False
     is_promoted: bool = False
+    # HomeTimeline associates this post with a short-lived feedback URL.  It is
+    # intentionally not included in the normal serialization surface.
+    not_interested_feedback: Optional[Dict[str, str]] = None
 
 
 @dataclass
