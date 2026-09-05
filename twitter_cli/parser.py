@@ -108,6 +108,7 @@ def _extract_author(user_data, user_legacy):
             or user_legacy.get("profile_image_url_https", "")
         ),
         verified=bool(user_data.get("is_blue_verified") or user_legacy.get("verified", False)),
+        following=bool(user_legacy.get("following", False)),
     )
 
 

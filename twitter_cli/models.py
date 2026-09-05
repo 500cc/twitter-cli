@@ -16,6 +16,7 @@ class Author:
     screen_name: str
     profile_image_url: str = ""
     verified: bool = False
+    following: bool = False
 
 
 @dataclass
