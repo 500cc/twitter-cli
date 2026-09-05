@@ -150,6 +150,7 @@ class TestExtractMedia:
         assert len(media) == 1
         assert media[0].type == "video"
         assert media[0].url == "https://high.mp4"
+        assert media[0].thumbnail_url == "https://pbs.twimg.com/thumb.jpg"
 
     def test_no_media(self):
         assert _extract_media({}) == []
@@ -174,6 +175,7 @@ class TestExtractMedia:
         media = _extract_media(legacy)
         assert len(media) == 1
         assert media[0].type == "animated_gif"
+        assert media[0].thumbnail_url == "https://pbs.twimg.com/gif.mp4"
 
 
 # ── _build_graphql_url ───────────────────────────────────────────────────

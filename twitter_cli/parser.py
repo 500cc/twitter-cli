@@ -85,6 +85,7 @@ def _extract_media(legacy):
                     url=mp4_variants[0]["url"] if mp4_variants else media_item.get("media_url_https", ""),
                     width=_deep_get(media_item, "original_info", "width"),
                     height=_deep_get(media_item, "original_info", "height"),
+                    thumbnail_url=media_item.get("media_url_https") or None,
                 )
             )
     return media

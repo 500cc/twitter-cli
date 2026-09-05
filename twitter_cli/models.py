@@ -34,6 +34,7 @@ class TweetMedia:
     url: str
     width: Optional[int] = None
     height: Optional[int] = None
+    thumbnail_url: Optional[str] = None
 
 
 @dataclass

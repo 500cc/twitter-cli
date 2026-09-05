@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from twitter_cli.serialization import tweet_from_dict, tweet_to_dict, tweets_from_json, tweets_to_json
+from twitter_cli.models import TweetMedia
 
 
 def test_tweet_roundtrip_dict(tweet_factory) -> None:
@@ -104,3 +105,22 @@ def test_tweet_roundtrip_preserves_viewer_reactions(tweet_factory) -> None:
     restored = tweet_from_dict(payload)
     assert restored.is_favorited is True
     assert restored.is_bookmarked is True
+
+
+def test_tweet_roundtrip_preserves_video_thumbnail(tweet_factory) -> None:
+    tweet = tweet_factory(
+        "102",
+        media=[
+            TweetMedia(
+                type="video",
+                url="https://video.twimg.com/video.mp4",
+                thumbnail_url="https://pbs.twimg.com/video-thumb.jpg",
+            )
+        ],
+    )
+
+    payload = tweet_to_dict(tweet)
+    restored = tweet_from_dict(payload)
+
+    assert payload["media"][0]["thumbnailUrl"] == "https://pbs.twimg.com/video-thumb.jpg"
+    assert restored.media[0].thumbnail_url == "https://pbs.twimg.com/video-thumb.jpg"
