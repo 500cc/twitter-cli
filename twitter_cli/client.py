@@ -179,7 +179,11 @@ class TwitterClient:
 
     def fetch_home_timeline(self, count=20, include_promoted=False, cursor=None, return_cursor=False, single_page=False, seen_tweet_ids=None):
         # type: (int, bool, Optional[str], bool, bool, Optional[List[str]]) -> Any
-        """Fetch home timeline tweets."""
+        """Fetch home timeline tweets.
+
+        seen_tweet_ids explicitly reports viewed posts to X. Omit it for
+        retrieval/prefetch; X may persist these impressions beyond this call.
+        """
         return self._fetch_timeline(
             "HomeTimeline",
             count,
@@ -188,12 +192,15 @@ class TwitterClient:
             start_cursor=cursor,
             return_cursor=return_cursor,
             single_page=single_page,
-            extra_variables={"seenTweetIds": list(seen_tweet_ids or [])[-100:]},
+            extra_variables=(
+                {"seenTweetIds": list(seen_tweet_ids)[-100:]}
+                if seen_tweet_ids is not None else None
+            ),
         )
 
     def fetch_following_feed(self, count=20, include_promoted=False, cursor=None, return_cursor=False, single_page=False, seen_tweet_ids=None):
         # type: (int, bool, Optional[str], bool, bool, Optional[List[str]]) -> Any
-        """Fetch chronological following feed."""
+        """Fetch chronological following feed; omit seen_tweet_ids for prefetch."""
         return self._fetch_timeline(
             "HomeLatestTimeline",
             count,
@@ -202,7 +209,10 @@ class TwitterClient:
             start_cursor=cursor,
             return_cursor=return_cursor,
             single_page=single_page,
-            extra_variables={"seenTweetIds": list(seen_tweet_ids or [])[-100:]},
+            extra_variables=(
+                {"seenTweetIds": list(seen_tweet_ids)[-100:]}
+                if seen_tweet_ids is not None else None
+            ),
         )
 
     def fetch_bookmarks(self, count=50):
@@ -838,12 +848,6 @@ class TwitterClient:
                 }
             if extra_variables:
                 variables.update(extra_variables)
-                if "seenTweetIds" in extra_variables:
-                    # Calls that paginate internally need the same recent-ID
-                    # context as a resident caller making one page at a time.
-                    variables["seenTweetIds"] = list(dict.fromkeys(
-                        list(extra_variables["seenTweetIds"]) + [tweet.id for tweet in tweets]
-                    ))[-100:]
             if cursor:
                 variables["cursor"] = cursor
 
