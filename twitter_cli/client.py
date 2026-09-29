@@ -11,6 +11,7 @@ import os
 import random
 import time
 import urllib.parse
+from email.utils import parsedate_to_datetime
 from typing import TYPE_CHECKING, Any, Callable, cast
 
 import bs4
@@ -62,6 +63,26 @@ if TYPE_CHECKING:
     from .models import Tweet  # noqa: F401
 
 logger = logging.getLogger(__name__)
+
+
+def _retry_after_seconds(headers):
+    """Respect both server deadlines; never shorten them to a local retry cap."""
+    delays = []
+    retry_after = headers.get("retry-after")
+    if retry_after:
+        try:
+            delays.append(float(retry_after))
+        except (TypeError, ValueError):
+            try:
+                delays.append(parsedate_to_datetime(retry_after).timestamp() - time.time())
+            except (TypeError, ValueError, OverflowError):
+                pass
+    try:
+        delays.append(float(headers.get("x-rate-limit-reset", 0)) - time.time())
+    except (TypeError, ValueError):
+        pass
+    return max((delay for delay in delays if math.isfinite(delay) and delay > 0), default=60.0)
+
 
 # Shared curl_cffi session (single-threaded CLI)
 _cffi_session = None
@@ -148,13 +169,16 @@ class TwitterClient:
         self._max_count = min(int(rl.get("maxCount", 200)), _ABSOLUTE_MAX_COUNT)
         self._client_transaction = None  # type: Optional[Any]
         self._ct_init_attempted = False
+        # Resident applications may schedule transport attempts themselves.
+        self.before_request = None  # type: Optional[Callable[[str], None]]
+        self.defer_rate_limits = False
         # Eagerly initialize ClientTransaction on construction
         self._ensure_client_transaction()
 
     # ── Read operations ──────────────────────────────────────────────
 
-    def fetch_home_timeline(self, count=20, include_promoted=False, cursor=None, return_cursor=False):
-        # type: (int, bool, Optional[str], bool) -> Any
+    def fetch_home_timeline(self, count=20, include_promoted=False, cursor=None, return_cursor=False, single_page=False):
+        # type: (int, bool, Optional[str], bool, bool) -> Any
         """Fetch home timeline tweets."""
         return self._fetch_timeline(
             "HomeTimeline",
@@ -163,10 +187,11 @@ class TwitterClient:
             include_promoted=include_promoted,
             start_cursor=cursor,
             return_cursor=return_cursor,
+            single_page=single_page,
         )
 
-    def fetch_following_feed(self, count=20, include_promoted=False, cursor=None, return_cursor=False):
-        # type: (int, bool, Optional[str], bool) -> Any
+    def fetch_following_feed(self, count=20, include_promoted=False, cursor=None, return_cursor=False, single_page=False):
+        # type: (int, bool, Optional[str], bool, bool) -> Any
         """Fetch chronological following feed."""
         return self._fetch_timeline(
             "HomeLatestTimeline",
@@ -175,6 +200,7 @@ class TwitterClient:
             include_promoted=include_promoted,
             start_cursor=cursor,
             return_cursor=return_cursor,
+            single_page=single_page,
         )
 
     def fetch_bookmarks(self, count=50):
@@ -772,8 +798,8 @@ class TwitterClient:
 
     # ── Internal: timeline / user list fetchers ──────────────────────
 
-    def _fetch_timeline(self, operation_name, count, get_instructions, extra_variables=None, override_base_variables=False, field_toggles=None, use_post=False, include_promoted=False, start_cursor=None, return_cursor=False):
-        # type: (str, int, Callable[[Any], Any], Optional[Dict[str, Any]], bool, Optional[Dict[str, Any]], bool, bool, Optional[str], bool) -> Any
+    def _fetch_timeline(self, operation_name, count, get_instructions, extra_variables=None, override_base_variables=False, field_toggles=None, use_post=False, include_promoted=False, start_cursor=None, return_cursor=False, single_page=False):
+        # type: (str, int, Callable[[Any], Any], Optional[Dict[str, Any]], bool, Optional[Dict[str, Any]], bool, bool, Optional[str], bool, bool) -> Any
         """Generic timeline fetcher with pagination and deduplication.
 
         Args:
@@ -834,6 +860,9 @@ class TwitterClient:
             continuation_cursor = next_cursor
             cursor = next_cursor
 
+            if single_page:
+                break
+
             if not new_tweets:
                 logger.debug("Timeline page returned no tweets but exposed next cursor; continuing pagination")
 
@@ -844,7 +873,9 @@ class TwitterClient:
                 time.sleep(jitter)
 
         if return_cursor:
-            return tweets[:count], continuation_cursor
+            # The cursor points past the whole source page. Truncating here
+            # would silently skip its extra posts on the next request.
+            return (tweets if single_page else tweets[:count]), continuation_cursor
         return tweets[:count]
 
     def _fetch_user_list(self, operation_name, user_id, count, get_instructions, use_post=False):
@@ -986,6 +1017,9 @@ class TwitterClient:
         json_body = body  # curl_cffi handles JSON serialization
 
         for attempt in range(self._max_retries + 1):
+            before_request = getattr(self, "before_request", None)
+            if before_request is not None:
+                before_request(url)
             try:
                 if method == "POST":
                     if form is None:
@@ -996,6 +1030,10 @@ class TwitterClient:
                     response = session.get(url, headers=headers, timeout=30)
 
                 status_code = response.status_code
+                if status_code == 429 and getattr(self, "defer_rate_limits", False):
+                    error = TwitterAPIError(429, "Timeline requests are temporarily rate limited")
+                    error.retry_after = _retry_after_seconds(response.headers)
+                    raise error
                 if status_code == 429 and attempt < self._max_retries:
                     wait = self._retry_base_delay * (2 ** attempt) + random.uniform(0, 2)
                     logger.warning(
@@ -1023,6 +1061,10 @@ class TwitterClient:
                 err_msg = parsed["errors"][0].get("message", "Unknown error")
                 # Rate limit can also surface as a JSON error (code 88)
                 err_code = parsed["errors"][0].get("code", 0)
+                if err_code == 88 and getattr(self, "defer_rate_limits", False):
+                    error = TwitterAPIError(429, err_msg)
+                    error.retry_after = _retry_after_seconds(response.headers)
+                    raise error
                 if err_code == 88 and attempt < self._max_retries:
                     wait = self._retry_base_delay * (2 ** attempt) + random.uniform(0, 2)
                     logger.warning(

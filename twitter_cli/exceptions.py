@@ -65,6 +65,7 @@ class TwitterAPIError(TwitterError):
 
     def __init__(self, status_code: int, message: str):
         self.status_code = status_code
+        self.retry_after: float | None = None
         self.message = message
         # Derive error_code from HTTP status
         if status_code in (401, 403):
