@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+
 from twitter_cli.client import TwitterClient
 from twitter_cli.parser import _deep_get, parse_timeline_response
 
@@ -107,3 +109,61 @@ def test_fetch_user_list_with_fixture(monkeypatch, fixture_loader) -> None:
     assert len(users) == 1
     assert users[0].screen_name == "follower1"
     assert users[0].verified is True
+
+
+def test_module_append_keeps_posts_and_feedback(fixture_loader) -> None:
+    payload = fixture_loader("home_timeline.json")
+    timeline = payload["data"]["home"]["home_timeline_urt"]
+    entry = timeline["instructions"][0]["entries"][0]
+    feedback = {
+        "feedbackType": "DontLike",
+        "feedbackUrl": "/2/timeline/feedback.json?feedback_type=DontLike&action_metadata=test",
+    }
+    entry["content"]["feedbackInfo"] = {"feedbackKeys": ["test-key"]}
+    timeline["responseObjects"] = {
+        "feedbackActions": [{"key": "test-key", "value": feedback}],
+    }
+    timeline["instructions"] = [{
+        "type": "TimelineAddToModule", "moduleEntryId": "home-conversation-1",
+        "moduleItems": [{"entryId": "tweet-1", "item": entry["content"]}],
+    }]
+
+    tweets, _ = parse_timeline_response(payload, lambda _: timeline["instructions"])
+
+    assert [tweet.id for tweet in tweets] == ["1"]
+    assert tweets[0].media[0].type == "photo"
+    assert tweets[0].not_interested_feedback == feedback
+
+
+def test_replaced_cursor_continues_instead_of_replaying_previous_page(fixture_loader) -> None:
+    payload = fixture_loader("home_timeline.json")
+    timeline = payload["data"]["home"]["home_timeline_urt"]
+    timeline["instructions"].append({
+        "type": "TimelineReplaceEntry", "entry_id_to_replace": "cursor-bottom-0",
+        "entry": {
+            "entryId": "cursor-bottom-1",
+            "content": {"cursorType": "Bottom", "value": "replacement-cursor"},
+        },
+    })
+
+    tweets, cursor = parse_timeline_response(payload, lambda _: timeline["instructions"])
+
+    assert len(tweets) == 2
+    assert cursor == "replacement-cursor"
+
+
+def test_module_entry_id_marks_promoted_posts(fixture_loader) -> None:
+    payload = fixture_loader("home_timeline.json")
+    timeline = payload["data"]["home"]["home_timeline_urt"]
+    content = timeline["instructions"][0]["entries"][0]["content"]
+    timeline["instructions"] = [{
+        "type": "TimelineAddEntries",
+        "entries": [{"content": {"items": [
+            {"entryId": "promoted-tweet-1", "item": copy.deepcopy(content)},
+        ]}}],
+    }]
+
+    tweets, _ = parse_timeline_response(payload, lambda _: timeline["instructions"])
+
+    assert len(tweets) == 1
+    assert tweets[0].is_promoted is True

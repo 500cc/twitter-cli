@@ -16,6 +16,9 @@ from .models import Author, Metrics, Tweet, TweetMedia, UserProfile
 
 logger = logging.getLogger(__name__)
 
+# Allows resident callers to identify support after rebuilding the submodule.
+TIMELINE_PARSER_VERSION = 2
+
 
 # ── Utility helpers ──────────────────────────────────────────────────────
 
@@ -536,42 +539,35 @@ def parse_timeline_response(data, get_instructions):
                 }
                 return
 
-    for instruction in instructions:
-        entries = instruction.get("entries") or instruction.get("moduleItems") or []
-        for entry in entries:
-            content = entry.get("content", {})
-            next_cursor = _extract_cursor(content) or next_cursor
-
-            item_content = content.get("itemContent", {})
-            result = _deep_get(item_content, "tweet_results", "result")
-            if result:
-                tweet = parse_tweet_result(result)
-                if tweet:
-                    attach_feedback(tweet, item_content, content.get("feedbackInfo"))
-                    tweet.is_promoted = bool(
-                        str(entry.get("entryId") or "").startswith("promoted-")
-                        or item_content.get("promotedMetadata")
-                    )
-                    tweets.append(tweet)
-
-            for nested_item in content.get("items", []):
-                nested_result = _deep_get(
-                    nested_item,
-                    "item",
-                    "itemContent",
-                    "tweet_results",
-                    "result",
+    def append_item(entry_id, content):
+        item_content = content.get("itemContent") or {}
+        result = _deep_get(item_content, "tweet_results", "result")
+        if result:
+            tweet = parse_tweet_result(result)
+            if tweet:
+                attach_feedback(tweet, item_content, content.get("feedbackInfo"))
+                tweet.is_promoted = bool(
+                    str(entry_id or "").startswith("promoted-")
+                    or item_content.get("promotedMetadata")
                 )
-                if nested_result:
-                    tweet = parse_tweet_result(nested_result)
-                    if tweet:
-                        nested_item = nested_item.get("item") or {}
-                        nested_item_content = nested_item.get("itemContent") or {}
-                        attach_feedback(tweet, nested_item_content, nested_item.get("feedbackInfo"))
-                        tweet.is_promoted = bool(
-                            str(_deep_get(nested_item, "entryId") or "").startswith("promoted-")
-                            or nested_item_content.get("promotedMetadata")
-                        )
-                        tweets.append(tweet)
+                tweets.append(tweet)
+
+    for instruction in instructions:
+        entries = list(instruction.get("entries") or instruction.get("moduleItems") or [])
+        # ReplaceEntry (including a refreshed Bottom cursor) and PinEntry
+        # carry a single entry, not an entries array.
+        if isinstance(instruction.get("entry"), dict):
+            entries.append(instruction["entry"])
+        for entry in entries:
+            # AddToModule puts ModuleEntry under item rather than content.
+            content = entry.get("content") or entry.get("item") or {}
+            next_cursor = _extract_cursor(content) or next_cursor
+            append_item(entry.get("entryId"), content)
+
+            for nested_item in content.get("items") or []:
+                append_item(
+                    nested_item.get("entryId"),
+                    nested_item.get("item") or {},
+                )
 
     return tweets, next_cursor
